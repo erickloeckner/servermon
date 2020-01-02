@@ -1,7 +1,10 @@
-use std::fs::File;
+use std::env;
+use std::fs::{self, File};
 use std::io::{self, BufReader};
 use std::io::prelude::*;
 //~ use std::path::PathBuf;
+use std::process;
+
 extern crate chrono;
 
 use std::thread;
@@ -9,26 +12,46 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 
+use serde_derive::Deserialize;
+#[derive(Deserialize)]
+struct Config {
+    load_threshold: f32,
+    loop_length: f32,
+}
+
 fn main() -> io::Result<()> {
+    let mut cwd = env::current_exe().unwrap();
+    cwd.pop();
+    if cwd.file_name().unwrap() == "release" || cwd.file_name().unwrap() == "debug" {
+        cwd.pop();
+        cwd.pop();
+    }
+    cwd.push("config.toml");
+    let config_raw = fs::read_to_string(cwd.to_str().unwrap()).unwrap();
+    let config: Config = toml::from_str(&config_raw).unwrap_or_else(|err| {
+        println!("error parsing config: {}", err);
+        process::exit(1);
+    });
+    
     let load_f = File::open("/proc/loadavg")?;
     let mut load_buf = BufReader::new(load_f);
     
     let mem_f = File::open("/proc/meminfo")?;
     let mut mem_buf = BufReader::new(mem_f);
     
-    let loop_len = 6.0f32;
-    let load_thresh: f32 = 0.1;
+    //~ let loop_len = 6.0f32;
+    //~ let load_thresh: f32 = 0.1;
     
-    for _i in 0..20 {
+    for _i in 0..5 {
         let loop_start = Instant::now();
         let current_load = parse_load(&mut load_buf);
         let current_mem = parse_mem(&mut mem_buf);
         
-        if current_load[0] > load_thresh {
+        if current_load[0] > config.load_threshold {
             let ts_now: DateTime<Utc> = Utc::now();
             println!("{} | {:?} | {:?}", ts_now, current_load, current_mem);
         }
-        thread::sleep(Duration::from_secs_f32(loop_len)
+        thread::sleep(Duration::from_secs_f32(config.loop_length)
             .checked_sub(loop_start.elapsed()).unwrap());
     }
     

@@ -1,9 +1,11 @@
+use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, BufReader};
 use std::io::prelude::*;
 //~ use std::path::PathBuf;
-use std::process;
+use std::process::{self, Command};
+use std::str;
 
 extern crate chrono;
 
@@ -17,6 +19,7 @@ use serde_derive::Deserialize;
 struct Config {
     load_threshold: f32,
     loop_length: f32,
+    commands: Vec<String>,
 }
 
 fn main() -> io::Result<()> {
@@ -42,10 +45,17 @@ fn main() -> io::Result<()> {
     //~ let loop_len = 6.0f32;
     //~ let load_thresh: f32 = 0.1;
     
+    let mut log_buf: VecDeque<String> = VecDeque::with_capacity(10);
+    for _i in 0..10 {
+        log_buf.push_back(String::from(""));
+    }
+    
     for _i in 0..5 {
         let loop_start = Instant::now();
         let current_load = parse_load(&mut load_buf);
         let current_mem = parse_mem(&mut mem_buf);
+        
+        run_commands(&config.commands, &mut log_buf);
         
         if current_load[0] > config.load_threshold {
             let ts_now: DateTime<Utc> = Utc::now();
@@ -53,6 +63,11 @@ fn main() -> io::Result<()> {
         }
         thread::sleep(Duration::from_secs_f32(config.loop_length)
             .checked_sub(loop_start.elapsed()).unwrap());
+    }
+    
+    println!("----------end----------");
+    for i in log_buf {
+        println!("{}", i);
     }
     
     //~ for i in load_buf.lines()
@@ -129,4 +144,24 @@ fn parse_mem(buf: &mut BufReader<File>) -> [f32; 2] {
     out[0] = (ram_total - ram_avail) / ram_total;
     out[1] = (swap_total - swap_free) / swap_total;
     out
+}
+
+fn run_commands(cmds: &Vec<String>, buf: &mut VecDeque<String>) {
+    for i in cmds {
+        //~ println!("{}", i);
+        let args: Vec<_> = i.split_whitespace().collect();
+        let output = Command::new(args.iter().nth(0).unwrap())
+            .args(args.iter().skip(1))
+            .output()
+            .expect("failed to execute");
+            
+        match str::from_utf8(&output.stdout) {
+            Ok(v) => {
+                //~ println!("{}", v);
+                buf.pop_front();
+                buf.push_back(String::from(v));
+            },
+            Err(_) => (),
+        }
+    }
 }

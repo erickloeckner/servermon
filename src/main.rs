@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::env;
-use std::fs::{self, File};
-use std::io::{self, BufReader};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, BufReader, BufWriter};
 use std::io::prelude::*;
 //~ use std::path::PathBuf;
 use std::process::{self, Command};
@@ -19,6 +19,7 @@ use serde_derive::Deserialize;
 struct Config {
     load_threshold: f32,
     loop_length: f32,
+    log_buffer_size: i16,
     commands: Vec<String>,
 }
 
@@ -30,7 +31,7 @@ fn main() -> io::Result<()> {
         cwd.pop();
     }
     cwd.push("config.toml");
-    let config_raw = fs::read_to_string(cwd.to_str().unwrap()).unwrap();
+    let config_raw = fs::read_to_string(cwd.to_str().unwrap())?;
     let config: Config = toml::from_str(&config_raw).unwrap_or_else(|err| {
         println!("error parsing config: {}", err);
         process::exit(1);
@@ -45,12 +46,20 @@ fn main() -> io::Result<()> {
     //~ let loop_len = 6.0f32;
     //~ let load_thresh: f32 = 0.1;
     
-    let mut log_buf: VecDeque<String> = VecDeque::with_capacity(10);
-    for _i in 0..10 {
+    let log_file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("servermon.log")
+        .unwrap();
+        
+    let mut log_writer = BufWriter::new(log_file);
+    
+    let mut log_buf: VecDeque<String> = VecDeque::with_capacity(config.log_buffer_size as usize);
+    for _i in 0..config.log_buffer_size {
         log_buf.push_back(String::from(""));
     }
     
-    for _i in 0..5 {
+    for _i in 0..12 {
         let loop_start = Instant::now();
         let current_load = parse_load(&mut load_buf);
         let current_mem = parse_mem(&mut mem_buf);
@@ -60,15 +69,32 @@ fn main() -> io::Result<()> {
         if current_load[0] > config.load_threshold {
             let ts_now: DateTime<Utc> = Utc::now();
             println!("{} | {:?} | {:?}", ts_now, current_load, current_mem);
+            
+            for i in &log_buf {
+                //~ println!("{}", i);
+                log_writer.write_all(i.as_bytes())?;
+                log_writer.flush()?;
+                //~ log_buf.pop_front();
+                //~ log_buf.push_back(String::from(""));
+            }
+            
+            for _i in 0..config.log_buffer_size {
+                log_buf.pop_front();
+                log_buf.push_back(String::from(""));
+            }
         }
         thread::sleep(Duration::from_secs_f32(config.loop_length)
             .checked_sub(loop_start.elapsed()).unwrap());
     }
     
     println!("----------end----------");
-    for i in log_buf {
-        println!("{}", i);
-    }
+    //~ for i in log_buf {
+        //~ println!("{}", i);
+        //~ log_writer.write_all(i.as_bytes())?;
+        //~ log_writer.flush()?;
+        
+        
+    //~ }
     
     //~ for i in load_buf.lines()
     Ok(())
@@ -147,6 +173,7 @@ fn parse_mem(buf: &mut BufReader<File>) -> [f32; 2] {
 }
 
 fn run_commands(cmds: &Vec<String>, buf: &mut VecDeque<String>) {
+    let mut out = String::new();
     for i in cmds {
         //~ println!("{}", i);
         let args: Vec<_> = i.split_whitespace().collect();
@@ -157,11 +184,14 @@ fn run_commands(cmds: &Vec<String>, buf: &mut VecDeque<String>) {
             
         match str::from_utf8(&output.stdout) {
             Ok(v) => {
-                //~ println!("{}", v);
-                buf.pop_front();
-                buf.push_back(String::from(v));
+                //~ buf.pop_front();
+                //~ buf.push_back(String::from(v));
+                out.push_str(v);
             },
             Err(_) => (),
         }
     }
+    out.push('\n');
+    buf.pop_front();
+    buf.push_back(out);
 }

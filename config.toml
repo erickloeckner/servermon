@@ -1,0 +1,4 @@
+load_threshold = 0.05
+loop_length = 6.0
+log_buffer_size = 10
+commands = ["date", "hostname"]
